@@ -5,6 +5,10 @@ import { prisma } from "@/lib/prisma";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   session: { strategy: "jwt" },
+  // Required behind a reverse proxy that terminates TLS (Railway, Fly, etc.)
+  // — without this Auth.js rejects the forwarded Host header as untrusted.
+  // Auto-detected on Vercel; explicit everywhere else.
+  trustHost: true,
   pages: {
     signIn: "/login",
   },
