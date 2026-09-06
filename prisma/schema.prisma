@@ -1023,6 +1023,7 @@ enum PaymentMethod {
 enum PaymentProvider {
   STRIPE
   STRIPE_DEV
+  SQUARE
   MANUAL
 }
 

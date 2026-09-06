@@ -1,8 +1,11 @@
+import { randomUUID } from "crypto";
+
 /**
  * Payment-provider abstraction. The app never touches raw card numbers —
  * it only ever stores a provider reference string. Checkout happens on the
- * provider's own hosted page (Stripe Checkout) or, in development, on a
- * clearly-labeled local simulation page that mimics the same redirect flow.
+ * provider's own hosted page (Stripe Checkout, Square Checkout) or, in
+ * development, on a clearly-labeled local simulation page that mimics the
+ * same redirect flow.
  */
 
 export type CheckoutParams = {
@@ -70,8 +73,71 @@ class StripePaymentProvider implements PaymentProvider {
   }
 }
 
+/**
+ * Square Checkout has no equivalent to Stripe's `{CHECKOUT_SESSION_ID}`
+ * redirect-time substitution — instead Square appends its own `orderId`
+ * (among others) to whatever redirect_url you give it. So the confirm pages
+ * verify Square payments by reading `orderId` off the redirect, not
+ * `providerRef` — see the `{CHECKOUT_SESSION_ID}` stripping below.
+ */
+class SquarePaymentProvider implements PaymentProvider {
+  constructor(private accessToken: string, private locationId: string) {}
+
+  async createCheckoutSession(params: CheckoutParams): Promise<CheckoutSession> {
+    const redirectUrl = params.successUrl.replace(/[?&]providerRef=\{CHECKOUT_SESSION_ID\}/, "");
+
+    const res = await fetch("https://connect.squareup.com/v2/online-checkout/payment-links", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.accessToken}`,
+        "Content-Type": "application/json",
+        "Square-Version": "2024-10-17",
+      },
+      body: JSON.stringify({
+        idempotency_key: randomUUID(),
+        order: {
+          location_id: this.locationId,
+          reference_id: params.reference,
+          line_items: [
+            {
+              name: params.description,
+              quantity: "1",
+              base_price_money: { amount: params.amountCents, currency: "USD" },
+            },
+          ],
+        },
+        checkout_options: { redirect_url: redirectUrl },
+      }),
+    });
+
+    if (!res.ok) {
+      throw new Error(`Square checkout link creation failed: ${await res.text()}`);
+    }
+
+    const json = (await res.json()) as { payment_link: { id: string; url: string; order_id: string } };
+    return { url: json.payment_link.url, providerRef: json.payment_link.id };
+  }
+}
+
+/** Fetches a Square order and reports whether it has been fully paid. */
+export async function verifySquareOrderPaid(orderId: string): Promise<boolean> {
+  const accessToken = process.env.SQUARE_ACCESS_TOKEN;
+  if (!accessToken) return false;
+
+  const res = await fetch(`https://connect.squareup.com/v2/orders/${orderId}`, {
+    headers: { Authorization: `Bearer ${accessToken}`, "Square-Version": "2024-10-17" },
+  });
+  if (!res.ok) return false;
+
+  const json = (await res.json()) as { order?: { state?: string } };
+  return json.order?.state === "COMPLETED";
+}
+
 export function getPaymentProvider(): PaymentProvider {
-  const { STRIPE_SECRET_KEY } = process.env;
+  const { SQUARE_ACCESS_TOKEN, SQUARE_LOCATION_ID, STRIPE_SECRET_KEY } = process.env;
+  if (SQUARE_ACCESS_TOKEN && SQUARE_LOCATION_ID) {
+    return new SquarePaymentProvider(SQUARE_ACCESS_TOKEN, SQUARE_LOCATION_ID);
+  }
   if (STRIPE_SECRET_KEY) {
     return new StripePaymentProvider(STRIPE_SECRET_KEY);
   }
