@@ -18,6 +18,7 @@ export async function generateInvoiceForJob(jobId: string): Promise<string> {
         estimate: {
           include: { options: { include: { lineItems: true } }, deposits: { where: { status: "PAID" } } },
         },
+        changeOrders: { where: { status: "APPROVED" } },
       },
     });
 
@@ -40,6 +41,14 @@ export async function generateInvoiceForJob(jobId: string): Promise<string> {
       depositCreditedDollars = job.estimate.deposits.reduce((sum, d) => sum + decToNum(d.amount), 0);
     } else {
       lineItems = [{ description: job.title, quantity: 1, unitPrice: decToNum(job.quotedTotal) }];
+    }
+
+    for (const co of job.changeOrders) {
+      lineItems.push({
+        description: `Change order: ${co.description}`,
+        quantity: 1,
+        unitPrice: decToNum(co.totalAmount),
+      });
     }
 
     const subtotal = lineItems.reduce((sum, li) => sum + li.quantity * li.unitPrice, 0);

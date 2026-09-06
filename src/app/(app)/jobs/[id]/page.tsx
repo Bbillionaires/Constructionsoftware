@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { prisma } from "@/lib/prisma";
-import { requireSession } from "@/lib/session";
+import { requireSession, MANAGER_ROLES } from "@/lib/session";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ import { ScheduleDialog } from "../schedule-dialog";
 import { addJobPhotoAction, deleteJobPhotoAction } from "@/lib/actions/job-photos";
 import { addJobMaterialAction, deleteJobMaterialAction } from "@/lib/actions/job-materials";
 import { completeJobAndRedirect } from "@/lib/actions/job-complete";
+import { ChangeOrdersPanel } from "./change-orders-panel";
 import { CheckCircle2, Trash2 } from "lucide-react";
 
 export default async function JobDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -33,6 +34,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
       jobCost: true,
       invoice: true,
       services: true,
+      changeOrders: { orderBy: { createdAt: "desc" } },
     },
   });
   if (!job) notFound();
@@ -125,6 +127,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
         <TabsList>
           <TabsTrigger value="photos">Photos ({job.photos.length})</TabsTrigger>
           <TabsTrigger value="materials">Materials</TabsTrigger>
+          <TabsTrigger value="change-orders">Change Orders ({job.changeOrders.length})</TabsTrigger>
           <TabsTrigger value="time">Time</TabsTrigger>
           <TabsTrigger value="costing">Profitability</TabsTrigger>
         </TabsList>
@@ -209,6 +212,23 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
               Variance: {formatCurrency(actualMaterial - estimatedMaterial)}
             </span>
           </div>
+        </TabsContent>
+
+        <TabsContent value="change-orders">
+          <ChangeOrdersPanel
+            jobId={job.id}
+            canManage={MANAGER_ROLES.includes(session.role)}
+            changeOrders={job.changeOrders.map((co) => ({
+              id: co.id,
+              description: co.description,
+              laborAmount: co.laborAmount.toString(),
+              materialAmount: co.materialAmount.toString(),
+              totalAmount: co.totalAmount.toString(),
+              status: co.status,
+              publicToken: co.publicToken,
+              createdAt: co.createdAt.toISOString(),
+            }))}
+          />
         </TabsContent>
 
         <TabsContent value="time" className="space-y-2">

@@ -945,6 +945,9 @@ model ChangeOrder {
   totalAmount    Decimal           @default(0) @db.Decimal(12, 2)
   status         ChangeOrderStatus @default(PENDING)
   createdById    String?
+  publicToken    String            @unique @default(cuid())
+  sentAt         DateTime?
+  respondedAt    DateTime?
   createdAt      DateTime          @default(now())
   approvedAt     DateTime?
 
