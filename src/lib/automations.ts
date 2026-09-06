@@ -22,6 +22,29 @@ function fillTemplate(template: string, vars: Record<string, string>) {
   return template.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? "");
 }
 
+/** Sends one notification email and logs it to the customer's communication history. */
+export async function sendNotificationEmail(
+  target: { companyId: string; customerId: string; jobId?: string },
+  to: string,
+  subject: string,
+  html: string
+) {
+  const result = await getEmailProvider().send(to, subject, html);
+  await prisma.communication.create({
+    data: {
+      companyId: target.companyId,
+      customerId: target.customerId,
+      jobId: target.jobId,
+      channel: "EMAIL",
+      direction: "OUTBOUND",
+      status: result.ok ? "SENT" : "FAILED",
+      body: html,
+      toAddress: to,
+    },
+  });
+  return result;
+}
+
 export async function runActiveAutomations(
   companyId: string,
   trigger: AutomationTrigger,
@@ -141,6 +164,13 @@ export async function processDueFollowUps() {
           toAddress: to,
         },
       });
+    } else if (estimate.customer.email) {
+      await sendNotificationEmail(
+        { companyId: estimate.companyId, customerId: estimate.customerId },
+        estimate.customer.email,
+        `${estimate.company.name} update`,
+        `<p>${message}</p>`
+      );
     }
 
     await prisma.estimateFollowUp.update({
@@ -198,6 +228,13 @@ export async function processDueReviewRequests() {
           toAddress: to,
         },
       });
+    } else if (rr.job.customer.email) {
+      await sendNotificationEmail(
+        { companyId: rr.companyId, customerId: rr.job.customerId, jobId: rr.jobId },
+        rr.job.customer.email,
+        `${rr.job.company.name} update`,
+        `<p>${message}</p>`
+      );
     }
     await prisma.reviewRequest.update({ where: { id: rr.id }, data: { status: "SENT", sentAt: new Date() } });
     sent++;

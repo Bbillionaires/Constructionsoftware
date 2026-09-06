@@ -243,7 +243,7 @@ export function EstimateBuilder({
       const token = await sendEstimateAction(estimateId);
       const link = `${window.location.origin}/portal/${token}`;
       await navigator.clipboard.writeText(link).catch(() => {});
-      toast.success("Estimate sent — customer link copied to clipboard.", { description: link });
+      toast.success("Estimate sent to customer — link also copied to clipboard.", { description: link });
       router.refresh();
     });
   }

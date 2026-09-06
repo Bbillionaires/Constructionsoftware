@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireSession, assertRole, ESTIMATOR_ROLES } from "@/lib/session";
 import { nextEstimateNumber } from "@/lib/numbering";
-import { scheduleEstimateFollowUps } from "@/lib/automations";
+import { scheduleEstimateFollowUps, sendNotificationEmail } from "@/lib/automations";
 import { convertEstimateToJob } from "@/lib/estimate-to-job";
 import type { EstimateOptionTier, LineItemType } from "@prisma/client";
 
@@ -141,12 +141,25 @@ export async function sendEstimateAction(estimateId: string) {
   const estimate = await prisma.estimate.update({
     where: { id: estimateId, companyId: session.companyId },
     data: { status: "SENT", sentAt: new Date(), expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000) },
+    include: { customer: true, company: true },
   });
 
   await scheduleEstimateFollowUps(estimate.id);
 
   if (estimate.leadId) {
     await prisma.lead.update({ where: { id: estimate.leadId }, data: { status: "ESTIMATE_SENT" } });
+  }
+
+  if (estimate.customer.email) {
+    const link = `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/portal/${estimate.publicToken}`;
+    await sendNotificationEmail(
+      { companyId: estimate.companyId, customerId: estimate.customerId },
+      estimate.customer.email,
+      `Your estimate from ${estimate.company.name}`,
+      `<p>Hi ${estimate.customer.firstName},</p>
+       <p>Your estimate "${estimate.title}" from ${estimate.company.name} is ready to review.</p>
+       <p><a href="${link}">View and approve your estimate</a></p>`
+    );
   }
 
   revalidatePath(`/estimates/${estimateId}`);
