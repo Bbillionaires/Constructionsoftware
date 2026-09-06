@@ -24,7 +24,7 @@ export type VoiceQuoteResult = {
 };
 
 export interface VoiceQuoteProvider {
-  process(audio: Buffer): Promise<VoiceQuoteResult>;
+  process(audio: Buffer, mimeType: string): Promise<VoiceQuoteResult>;
 }
 
 class DevVoiceQuoteProvider implements VoiceQuoteProvider {
@@ -89,11 +89,14 @@ class CloudflareVoiceQuoteProvider implements VoiceQuoteProvider {
     return res.json();
   }
 
-  async process(audio: Buffer): Promise<VoiceQuoteResult> {
+  async process(audio: Buffer, mimeType: string): Promise<VoiceQuoteResult> {
+    // Whisper on Workers AI rejects a generic application/octet-stream body
+    // with "Invalid input" — it needs the real audio/* content type to know
+    // how to decode the recording.
     const whisper = (await this.run(
       "@cf/openai/whisper-large-v3-turbo",
       new Uint8Array(audio),
-      "application/octet-stream"
+      mimeType || "audio/webm"
     )) as { result: { text: string } };
     const transcript = whisper.result.text.trim();
 

@@ -24,7 +24,7 @@ export async function createEstimateFromVoiceAction(formData: FormData) {
   if (!allowed) redirect("/billing");
 
   const buffer = Buffer.from(await audio.arrayBuffer());
-  const result = await getVoiceQuoteProvider().process(buffer);
+  const result = await getVoiceQuoteProvider().process(buffer, audio.type);
 
   const estimateId = await prisma.$transaction(async (tx) => {
     const number = await nextEstimateNumber(tx, session.companyId);
