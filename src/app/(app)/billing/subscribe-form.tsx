@@ -21,10 +21,12 @@ export function SubscribeForm({
   liveCardCaptureConfigured,
   squareApplicationId,
   squareLocationId,
+  sandbox,
 }: {
   liveCardCaptureConfigured: boolean;
   squareApplicationId?: string;
   squareLocationId?: string;
+  sandbox: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const [ready, setReady] = useState(false);
@@ -37,7 +39,7 @@ export function SubscribeForm({
     async function init() {
       if (!window.Square) {
         const script = document.createElement("script");
-        script.src = "https://web.squarecdn.com/v1/square.js";
+        script.src = sandbox ? "https://sandbox.web.squarecdn.com/v1/square.js" : "https://web.squarecdn.com/v1/square.js";
         script.async = true;
         await new Promise<void>((resolve, reject) => {
           script.onload = () => resolve();
@@ -58,7 +60,7 @@ export function SubscribeForm({
     return () => {
       cancelled = true;
     };
-  }, [liveCardCaptureConfigured, squareApplicationId, squareLocationId]);
+  }, [liveCardCaptureConfigured, squareApplicationId, squareLocationId, sandbox]);
 
   function submit(cardSourceId: string) {
     startTransition(async () => {
@@ -89,6 +91,12 @@ export function SubscribeForm({
 
   return (
     <div className="space-y-3">
+      {sandbox && (
+        <p className="text-xs text-muted-foreground">
+          Test mode — use Square&apos;s test card <strong>4111 1111 1111 1111</strong>, any future expiry, any
+          CVV, any postal code. No real charge happens.
+        </p>
+      )}
       <div id="card-container" className="rounded-md border p-3" />
       <Button
         disabled={!ready || pending}

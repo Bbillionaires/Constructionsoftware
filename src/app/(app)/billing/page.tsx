@@ -10,15 +10,30 @@ export default async function BillingPage() {
   assertRole(session, MANAGER_ROLES);
 
   const company = await prisma.company.findUniqueOrThrow({ where: { id: session.companyId } });
-  const squareApplicationId = process.env.NEXT_PUBLIC_SQUARE_APPLICATION_ID;
+
+  // Sandbox mode runs the entire real flow (tokenization, customer/card/
+  // subscription creation) against Square's separate test environment — no
+  // real money moves. It's a different Square app/account, not a bypass of
+  // the real one, so it's safe to leave available without gating it off from
+  // real customers who might otherwise never subscribe for real.
+  const isSandbox = process.env.SQUARE_ENVIRONMENT === "sandbox";
+  const squareApplicationId = isSandbox
+    ? process.env.NEXT_PUBLIC_SQUARE_SANDBOX_APPLICATION_ID
+    : process.env.NEXT_PUBLIC_SQUARE_APPLICATION_ID;
+  const squareLocationId = isSandbox ? process.env.SQUARE_SANDBOX_LOCATION_ID : process.env.SQUARE_LOCATION_ID;
   const liveCardCaptureConfigured = Boolean(
-    squareApplicationId && process.env.SQUARE_ACCESS_TOKEN && process.env.SQUARE_LOCATION_ID
+    squareApplicationId &&
+      squareLocationId &&
+      (isSandbox ? process.env.SQUARE_SANDBOX_ACCESS_TOKEN : process.env.SQUARE_ACCESS_TOKEN)
   );
 
   return (
     <div className="mx-auto max-w-lg space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold">Billing</h1>
+        <h1 className="flex items-center gap-2 text-2xl font-semibold">
+          Billing
+          {isSandbox && <Badge variant="secondary">Test mode — no real charge</Badge>}
+        </h1>
         <p className="text-sm text-muted-foreground">
           Your first estimate is free. After that, ${SUBSCRIPTION_PRICE_DOLLARS}/month keeps everything running.
         </p>
@@ -48,7 +63,8 @@ export default async function BillingPage() {
               <SubscribeForm
                 liveCardCaptureConfigured={liveCardCaptureConfigured}
                 squareApplicationId={squareApplicationId}
-                squareLocationId={process.env.SQUARE_LOCATION_ID}
+                squareLocationId={squareLocationId}
+                sandbox={isSandbox}
               />
             </>
           )}

@@ -38,11 +38,12 @@ class DevSubscriptionProvider implements SubscriptionProvider {
 class SquareSubscriptionProvider implements SubscriptionProvider {
   constructor(
     private accessToken: string,
-    private locationId: string
+    private locationId: string,
+    private baseUrl: string
   ) {}
 
   private async square(path: string, init: RequestInit) {
-    const res = await fetch(`https://connect.squareup.com/v2${path}`, {
+    const res = await fetch(`${this.baseUrl}/v2${path}`, {
       ...init,
       headers: {
         Authorization: `Bearer ${this.accessToken}`,
@@ -146,10 +147,24 @@ class SquareSubscriptionProvider implements SubscriptionProvider {
   }
 }
 
+/**
+ * Square Sandbox is a fully separate test environment (its own app
+ * credentials, its own fake location, its own API host) that lets you run
+ * this entire flow — real tokenization, real customer/card/subscription
+ * objects — without ever touching real money. Set SQUARE_ENVIRONMENT=sandbox
+ * plus the SQUARE_SANDBOX_* vars to test; leave it unset (or "production")
+ * for the live paywall real customers hit. Never let sandbox mode bypass
+ * the charge in production — it's a different Square account, not a flag
+ * that skips payment.
+ */
 export function getSubscriptionProvider(): SubscriptionProvider {
-  const { SQUARE_ACCESS_TOKEN, SQUARE_LOCATION_ID } = process.env;
-  if (SQUARE_ACCESS_TOKEN && SQUARE_LOCATION_ID) {
-    return new SquareSubscriptionProvider(SQUARE_ACCESS_TOKEN, SQUARE_LOCATION_ID);
+  const isSandbox = process.env.SQUARE_ENVIRONMENT === "sandbox";
+  const accessToken = isSandbox ? process.env.SQUARE_SANDBOX_ACCESS_TOKEN : process.env.SQUARE_ACCESS_TOKEN;
+  const locationId = isSandbox ? process.env.SQUARE_SANDBOX_LOCATION_ID : process.env.SQUARE_LOCATION_ID;
+  const baseUrl = isSandbox ? "https://connect.squareupsandbox.com" : "https://connect.squareup.com";
+
+  if (accessToken && locationId) {
+    return new SquareSubscriptionProvider(accessToken, locationId, baseUrl);
   }
   return new DevSubscriptionProvider();
 }
