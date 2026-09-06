@@ -52,6 +52,19 @@ export async function removeTeamMemberAction(memberId: string) {
   const session = await requireSession();
   assertRole(session, MANAGER_ROLES);
 
-  await prisma.companyMember.delete({ where: { id: memberId, companyId: session.companyId } });
+  const member = await prisma.companyMember.delete({
+    where: { id: memberId, companyId: session.companyId },
+  });
+
+  // Deactivate rather than delete so past job assignments/time entries keep
+  // their technician reference, but the removed person stops appearing in
+  // "assign technician" pickers and schedule/report views.
+  await prisma.technician.updateMany({
+    where: { companyId: session.companyId, userId: member.userId },
+    data: { isActive: false },
+  });
+
   revalidatePath("/team");
+  revalidatePath("/jobs");
+  revalidatePath("/schedule");
 }

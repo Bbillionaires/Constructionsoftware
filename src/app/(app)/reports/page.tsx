@@ -154,7 +154,7 @@ export default async function ReportsPage() {
                       <TableCell>{t.jobsCompleted}</TableCell>
                       <TableCell>{t.hours.toFixed(1)}</TableCell>
                       <TableCell>{formatCurrency(t.revenue)}</TableCell>
-                      <TableCell>{formatCurrency(t.revenuePerHour)}</TableCell>
+                      <TableCell>{t.hours >= 0.1 ? formatCurrency(t.revenuePerHour) : "—"}</TableCell>
                     </TableRow>
                   ))}
                   {technicians.length === 0 && (

@@ -127,7 +127,10 @@ export async function getTechnicianProductivityReport(companyId: string) {
       jobsCompleted,
       hours,
       revenue,
-      revenuePerHour: hours > 0 ? revenue / hours : 0,
+      // Below a few minutes, a clock-in/out (real or mis-tapped) is too short
+      // to divide by meaningfully — it would otherwise blow up into a
+      // nonsensical revenue-per-hour figure.
+      revenuePerHour: hours >= 0.1 ? revenue / hours : 0,
     });
   }
 

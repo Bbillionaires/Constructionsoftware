@@ -77,6 +77,10 @@ export async function approveEstimateAction(
 
 export async function declineEstimateAction(token: string, reason: string) {
   const estimate = await getEstimateByToken(token);
+  // A stale/back-button view of the portal page could still submit this
+  // after the customer already approved (and possibly converted to a job)
+  // elsewhere — never let a decline undo that.
+  if (estimate.job || estimate.status === "APPROVED") redirect(`/portal/${token}`);
   await prisma.estimate.update({
     where: { id: estimate.id },
     data: { status: "DECLINED", declinedReason: reason || null, respondedAt: new Date() },
