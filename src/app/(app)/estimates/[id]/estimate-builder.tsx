@@ -77,6 +77,7 @@ export function EstimateBuilder({
   customerLabel,
   propertyLabel,
   hasJob,
+  voiceTranscript,
 }: {
   estimateId: string;
   status: EstimateStatus;
@@ -93,6 +94,7 @@ export function EstimateBuilder({
   customerLabel: string;
   propertyLabel: string;
   hasJob: boolean;
+  voiceTranscript?: string | null;
 }) {
   const router = useRouter();
   const [title, setTitle] = useState(initialTitle);
@@ -214,6 +216,7 @@ export function EstimateBuilder({
         lineItems: o.lineItems.map((li) => ({
           type: li.type,
           description: li.description,
+          supplier: li.supplier,
           quantity: li.quantity,
           unitCost: li.unitCost,
           unitPrice: li.unitPrice,
@@ -272,6 +275,15 @@ export function EstimateBuilder({
           </div>
           <Badge variant="outline">{status.replace(/_/g, " ")}</Badge>
         </div>
+
+        {voiceTranscript && (
+          <details className="rounded-md border bg-muted/30 p-3 text-sm">
+            <summary className="cursor-pointer font-medium text-muted-foreground">
+              Built from a voice recording — click to see what was heard
+            </summary>
+            <p className="mt-2 whitespace-pre-wrap text-muted-foreground">{voiceTranscript}</p>
+          </details>
+        )}
 
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={handleSave} disabled={saving}>
@@ -337,7 +349,8 @@ export function EstimateBuilder({
 
               <div className="space-y-2">
                 {o.lineItems.map((li) => (
-                  <div key={li.id} className="grid grid-cols-12 items-center gap-2 rounded-md border p-2">
+                  <div key={li.id} className="rounded-md border p-2">
+                  <div className="grid grid-cols-12 items-center gap-2">
                     <div className="col-span-2">
                       <Select
                         value={li.type}
@@ -397,6 +410,15 @@ export function EstimateBuilder({
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
+                  </div>
+                  {li.type === "MATERIAL" && (
+                    <Input
+                      className="mt-2 h-8"
+                      placeholder="Supplier (e.g. Ferguson, Home Depot)"
+                      value={li.supplier ?? ""}
+                      onChange={(e) => updateLineItem(o.id, li.id, { supplier: e.target.value })}
+                    />
+                  )}
                   </div>
                 ))}
                 {o.lineItems.length === 0 && (

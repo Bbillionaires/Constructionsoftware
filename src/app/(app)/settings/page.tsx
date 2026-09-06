@@ -39,6 +39,10 @@ export default async function SettingsPage() {
     (process.env.SQUARE_ACCESS_TOKEN && process.env.SQUARE_LOCATION_ID) || process.env.STRIPE_SECRET_KEY
   );
   const paymentsProviderName = process.env.SQUARE_ACCESS_TOKEN ? "Square" : "Stripe";
+  const voiceQuoteLive = Boolean(process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN);
+  const subscriptionBillingLive = Boolean(
+    process.env.NEXT_PUBLIC_SQUARE_APPLICATION_ID && process.env.SQUARE_ACCESS_TOKEN && process.env.SQUARE_LOCATION_ID
+  );
 
   return (
     <div className="space-y-6">
@@ -92,6 +96,18 @@ export default async function SettingsPage() {
             live={paymentsLive}
             liveLabel={`Processing real charges via ${paymentsProviderName}.`}
             devNote="No payment provider configured — checkout uses a safe on-screen simulator."
+          />
+          <IntegrationRow
+            name="Voice-to-quote"
+            live={voiceQuoteLive}
+            liveLabel="Transcribing and extracting quotes via Cloudflare Workers AI."
+            devNote="No Cloudflare AI credentials configured — voice quotes use a simulated transcript."
+          />
+          <IntegrationRow
+            name="Subscription billing"
+            live={subscriptionBillingLive}
+            liveLabel="Charging real cards for the monthly plan via Square."
+            devNote="No live card capture configured — subscribing on /billing is simulated."
           />
         </CardContent>
       </Card>

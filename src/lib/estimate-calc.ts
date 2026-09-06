@@ -12,6 +12,7 @@ import type { LineItemType } from "@prisma/client";
 export type LineItemInput = {
   type: LineItemType;
   description: string;
+  supplier?: string | null;
   quantity: number;
   unitCost: number;
   unitPrice: number;

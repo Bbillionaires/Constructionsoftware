@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireSession, assertRole, ESTIMATOR_ROLES } from "@/lib/session";
 import { nextEstimateNumber } from "@/lib/numbering";
+import { claimFreeEstimateOrRequireSubscription } from "@/lib/billing";
 import { scheduleEstimateFollowUps, sendNotificationEmail } from "@/lib/automations";
 import { convertEstimateToJob } from "@/lib/estimate-to-job";
 import type { EstimateOptionTier, LineItemType } from "@prisma/client";
@@ -19,6 +20,9 @@ export async function createEstimateAction(formData: FormData) {
   const title = String(formData.get("title") ?? "New estimate").trim() || "New estimate";
 
   if (!customerId || !propertyId) throw new Error("Customer and property are required.");
+
+  const allowed = await claimFreeEstimateOrRequireSubscription(session.companyId);
+  if (!allowed) redirect("/billing");
 
   const estimateId = await prisma.$transaction(async (tx) => {
     const number = await nextEstimateNumber(tx, session.companyId);
@@ -56,6 +60,7 @@ export async function createEstimateAction(formData: FormData) {
 export type LineItemPayload = {
   type: LineItemType;
   description: string;
+  supplier?: string | null;
   quantity: number;
   unitCost: number;
   unitPrice: number;
@@ -118,6 +123,7 @@ export async function saveEstimateAction(estimateId: string, payload: EstimateSa
             create: opt.lineItems.map((li, j) => ({
               type: li.type,
               description: li.description,
+              supplier: li.supplier || null,
               quantity: li.quantity,
               unitCost: li.unitCost,
               unitPrice: li.unitPrice,

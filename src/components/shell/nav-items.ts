@@ -12,6 +12,7 @@ import {
   BarChart3,
   Users2,
   Settings,
+  CreditCard,
   type LucideIcon,
 } from "lucide-react";
 
@@ -34,5 +35,6 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/invoices", label: "Invoices", icon: Receipt },
   { href: "/reports", label: "Reports", icon: BarChart3 },
   { href: "/team", label: "Team", icon: Users2, roles: ["OWNER", "ADMIN"] },
+  { href: "/billing", label: "Billing", icon: CreditCard, roles: ["OWNER", "ADMIN"] },
   { href: "/settings", label: "Settings", icon: Settings, roles: ["OWNER", "ADMIN"] },
 ];

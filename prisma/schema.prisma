@@ -74,6 +74,17 @@ model Company {
   nextEstimateNumber  Int      @default(1001)
   nextJobNumber       Int      @default(1001)
   nextInvoiceNumber   Int      @default(1001)
+
+  // Billing: signup is free — every company gets exactly one free estimate
+  // (freeQuoteUsedAt is claimed atomically the moment they create it). Any
+  // estimate after that requires subscriptionStatus === ACTIVE.
+  subscriptionStatus   SubscriptionStatus @default(NONE)
+  freeQuoteUsedAt      DateTime?
+  squareCustomerId     String?
+  squareCardId         String?
+  squareSubscriptionId String?
+  subscriptionStartedAt DateTime?
+
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
@@ -450,6 +461,7 @@ model Estimate {
   taxPercent     Decimal        @default(0) @db.Decimal(5, 2)
   depositPercent Decimal?       @db.Decimal(5, 2)
   depositAmount  Decimal?       @db.Decimal(12, 2)
+  voiceTranscript String?
   notes          String?
   terms          String?
   publicToken    String         @unique @default(cuid())
@@ -516,6 +528,7 @@ model EstimateLineItem {
   priceBookItemId   String?
   type              LineItemType
   description       String
+  supplier          String?
   quantity          Decimal      @default(1) @db.Decimal(10, 2)
   unitCost          Decimal      @default(0) @db.Decimal(12, 2)
   unitPrice         Decimal      @default(0) @db.Decimal(12, 2)
@@ -1028,6 +1041,13 @@ enum PaymentProvider {
   STRIPE_DEV
   SQUARE
   MANUAL
+}
+
+enum SubscriptionStatus {
+  NONE
+  ACTIVE
+  PAST_DUE
+  CANCELED
 }
 
 enum PaymentStatus {

@@ -37,6 +37,7 @@ export default async function EstimateDetailPage({ params }: { params: Promise<{
       id: li.id,
       type: li.type,
       description: li.description,
+      supplier: li.supplier,
       quantity: decToNum(li.quantity),
       unitCost: decToNum(li.unitCost),
       unitPrice: decToNum(li.unitPrice),
@@ -69,6 +70,7 @@ export default async function EstimateDetailPage({ params }: { params: Promise<{
       customerLabel={`${estimate.customer.firstName} ${estimate.customer.lastName}`}
       propertyLabel={`${estimate.property.addressLine1}, ${estimate.property.city}`}
       hasJob={!!estimate.job}
+      voiceTranscript={estimate.voiceTranscript}
     />
   );
 }
