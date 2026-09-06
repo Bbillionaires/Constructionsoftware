@@ -109,9 +109,22 @@ class CloudflareVoiceQuoteProvider implements VoiceQuoteProvider {
         ],
       }),
       "application/json"
-    )) as { result: { response: string } };
+    )) as {
+      result: {
+        response?: string | object;
+        choices?: { message?: { content?: string } }[];
+      };
+    };
 
-    const parsed = parseExtractionResponse(llm.result.response);
+    // Prefer the standard OpenAI-compatible choices[0].message.content (always
+    // the raw string) — result.response is a Cloudflare convenience field that
+    // can come back already parsed into an object instead of a JSON string,
+    // depending on the model, which breaks a plain string-based JSON extract.
+    const rawContent =
+      llm.result.choices?.[0]?.message?.content ??
+      (typeof llm.result.response === "string" ? llm.result.response : JSON.stringify(llm.result.response ?? {}));
+
+    const parsed = parseExtractionResponse(rawContent);
     return { transcript, title: parsed.title, lineItems: parsed.lineItems };
   }
 }
