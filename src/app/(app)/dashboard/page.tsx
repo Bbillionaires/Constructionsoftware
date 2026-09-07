@@ -1,13 +1,20 @@
 import Link from "next/link";
 import { requireSession } from "@/lib/session";
-import { getDashboardData } from "@/lib/dashboard";
+import { getDashboardData, resolveSalesRange } from "@/lib/dashboard";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatCurrency, formatPercent } from "@/lib/money";
 import { AlertTriangle, Inbox, FileWarning, Camera } from "lucide-react";
+import { SalesRangePicker } from "./sales-range-picker";
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ range?: string; from?: string; to?: string }>;
+}) {
   const session = await requireSession();
-  const d = await getDashboardData(session.companyId);
+  const { range, from, to } = await searchParams;
+  const salesRange = resolveSalesRange(range, from, to);
+  const d = await getDashboardData(session.companyId, salesRange);
 
   return (
     <div className="space-y-8">
@@ -16,17 +23,25 @@ export default async function DashboardPage() {
         <p className="text-sm text-muted-foreground">{session.companyName} — here&apos;s where things stand.</p>
       </div>
 
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-lg font-semibold">Sales — {d.salesRangeLabel}</h2>
+          <SalesRangePicker activePreset={salesRange.preset} />
+        </div>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          <Stat label="Cash collected" value={formatCurrency(d.cashCollected)} />
+          <Stat label="Revenue booked" value={formatCurrency(d.revenueBooked)} />
+          <Stat label="Gross profit" value={formatCurrency(d.grossProfit)} />
+          <Stat label="Jobs completed" value={String(d.jobsCompletedCount)} />
+          <Stat label="Average ticket" value={formatCurrency(d.averageTicket)} />
+          <Stat label="Conversion rate" value={formatPercent(d.conversionRate)} />
+          <Stat label="Outstanding invoices" value={formatCurrency(d.outstandingInvoices)} />
+        </div>
+      </div>
+
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-        <Stat label="Today's revenue" value={formatCurrency(d.todaysRevenue)} />
-        <Stat label="Cash collected (mo.)" value={formatCurrency(d.cashCollectedMonth)} />
-        <Stat label="Revenue booked (mo.)" value={formatCurrency(d.revenueMonth)} />
-        <Stat label="Outstanding invoices" value={formatCurrency(d.outstandingInvoices)} />
-        <Stat label="Gross profit (mo.)" value={formatCurrency(d.grossProfitMonth)} />
         <Stat label="Jobs today" value={String(d.jobsToday)} />
         <Stat label="Jobs this week" value={String(d.jobsThisWeek)} />
-        <Stat label="Jobs completed (mo.)" value={String(d.jobsCompletedMonth)} />
-        <Stat label="Average ticket" value={formatCurrency(d.averageTicket)} />
-        <Stat label="Conversion rate (mo.)" value={formatPercent(d.conversionRate)} />
         <Stat label="Crew utilization (wk.)" value={formatPercent(d.crewUtilization)} />
         <Stat label="New leads (7d)" value={String(d.newLeadsCount)} />
       </div>
@@ -69,7 +84,7 @@ export default async function DashboardPage() {
             <MoneyStat label="Needs follow-up" value={d.needsFollowUpValue} />
             <MoneyStat label="No response 3+ days" value={d.noResponse3Value} />
             <MoneyStat label="No response 7+ days" value={d.noResponse7Value} />
-            <MoneyStat label="Recovered this month" value={d.recoveredValue} positive />
+            <MoneyStat label={`Recovered — ${d.salesRangeLabel}`} value={d.recoveredValue} positive />
           </CardContent>
         </Card>
         <Link href="/estimates/recovery" className="mt-2 inline-block text-sm underline">

@@ -2,14 +2,12 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { getEstimateTotals, OPEN_ESTIMATE_STATUSES, decToNum } from "@/lib/estimate-totals";
 import { fromCents } from "@/lib/money";
+import { SALES_RANGE_PRESETS, type SalesRangePreset } from "@/lib/dashboard-ranges";
 
 function startOfDay(d = new Date()) {
   const x = new Date(d);
   x.setHours(0, 0, 0, 0);
   return x;
-}
-function startOfMonth(d = new Date()) {
-  return new Date(d.getFullYear(), d.getMonth(), 1);
 }
 function startOfWeek(d = new Date()) {
   const x = startOfDay(d);
@@ -17,18 +15,62 @@ function startOfWeek(d = new Date()) {
   x.setDate(x.getDate() + (day === 0 ? -6 : 1 - day));
   return x;
 }
+function addDays(d: Date, n: number) {
+  return new Date(d.getTime() + n * 24 * 60 * 60 * 1000);
+}
+function addMonths(d: Date, n: number) {
+  return new Date(d.getFullYear(), d.getMonth() + n, d.getDate());
+}
+function formatDate(d: Date) {
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
 
-export async function getDashboardData(companyId: string) {
+export type SalesRange = { start: Date; end: Date; preset: SalesRangePreset; label: string };
+
+/** Resolves the dashboard's sales-metrics window from URL search params (preset, or custom from/to). */
+export function resolveSalesRange(preset?: string | null, from?: string | null, to?: string | null): SalesRange {
   const now = new Date();
   const todayStart = startOfDay(now);
-  const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
-  const monthStart = startOfMonth(now);
+  const todayEnd = addDays(todayStart, 1);
+
+  if (preset === "custom" && from && to) {
+    const fromDate = new Date(from);
+    const toDate = new Date(to);
+    if (!Number.isNaN(fromDate.getTime()) && !Number.isNaN(toDate.getTime())) {
+      const start = startOfDay(fromDate);
+      const end = addDays(startOfDay(toDate), 1);
+      if (start < end) {
+        return { start, end, preset: "custom", label: `${formatDate(start)} – ${formatDate(startOfDay(toDate))}` };
+      }
+    }
+  }
+
+  const known = SALES_RANGE_PRESETS.find((p) => p.value === preset);
+  switch (known?.value) {
+    case "7d":
+      return { start: addDays(todayStart, -7), end: todayEnd, preset: "7d", label: known.label };
+    case "30d":
+      return { start: addDays(todayStart, -30), end: todayEnd, preset: "30d", label: known.label };
+    case "3m":
+      return { start: startOfDay(addMonths(now, -3)), end: todayEnd, preset: "3m", label: known.label };
+    case "6m":
+      return { start: startOfDay(addMonths(now, -6)), end: todayEnd, preset: "6m", label: known.label };
+    case "1y":
+      return { start: startOfDay(addMonths(now, -12)), end: todayEnd, preset: "1y", label: known.label };
+    default:
+      return { start: todayStart, end: todayEnd, preset: "today", label: "Today" };
+  }
+}
+
+export async function getDashboardData(companyId: string, salesRange: SalesRange) {
+  const now = new Date();
+  const todayStart = startOfDay(now);
+  const todayEnd = addDays(todayStart, 1);
   const weekStart = startOfWeek(now);
-  const weekEnd = new Date(weekStart.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const weekEnd = addDays(weekStart, 7);
 
   const [
-    paymentsToday,
-    paymentsMonth,
+    paymentsInRange,
     outstandingInvoices,
     openEstimates,
     jobsToday,
@@ -36,17 +78,13 @@ export async function getDashboardData(companyId: string) {
     newLeadsCount,
     leadsAwaitingResponse,
     estimatesAwaitingFollowUp,
-    jobsCompletedMonth,
-    estimatesRespondedMonth,
+    jobsCompletedInRange,
+    estimatesRespondedInRange,
     technicianCount,
     company,
   ] = await Promise.all([
     prisma.payment.aggregate({
-      where: { companyId, status: "SUCCEEDED", paidAt: { gte: todayStart, lt: todayEnd } },
-      _sum: { amount: true },
-    }),
-    prisma.payment.aggregate({
-      where: { companyId, status: "SUCCEEDED", paidAt: { gte: monthStart } },
+      where: { companyId, status: "SUCCEEDED", paidAt: { gte: salesRange.start, lt: salesRange.end } },
       _sum: { amount: true },
     }),
     prisma.invoice.aggregate({
@@ -59,22 +97,26 @@ export async function getDashboardData(companyId: string) {
     }),
     prisma.job.count({ where: { companyId, scheduledStart: { gte: todayStart, lt: todayEnd } } }),
     prisma.job.count({ where: { companyId, scheduledStart: { gte: weekStart, lt: weekEnd } } }),
-    prisma.lead.count({ where: { companyId, receivedAt: { gte: new Date(now.getTime() - 7 * 86400000) } } }),
+    prisma.lead.count({ where: { companyId, receivedAt: { gte: addDays(now, -7) } } }),
     prisma.lead.count({ where: { companyId, status: "NEW" } }),
     prisma.estimate.count({ where: { companyId, status: "FOLLOW_UP_DUE" } }),
     prisma.job.findMany({
-      where: { companyId, status: { in: ["COMPLETED", "INVOICED", "CLOSED"] }, actualEnd: { gte: monthStart } },
+      where: {
+        companyId,
+        status: { in: ["COMPLETED", "INVOICED", "CLOSED"] },
+        actualEnd: { gte: salesRange.start, lt: salesRange.end },
+      },
       include: { jobCost: true },
     }),
     prisma.estimate.count({
-      where: { companyId, respondedAt: { gte: monthStart }, status: { in: ["APPROVED", "DECLINED"] } },
+      where: { companyId, respondedAt: { gte: salesRange.start, lt: salesRange.end }, status: { in: ["APPROVED", "DECLINED"] } },
     }),
     prisma.technician.count({ where: { companyId, isActive: true } }),
     prisma.company.findUniqueOrThrow({ where: { id: companyId } }),
   ]);
 
-  const approvedThisMonth = await prisma.estimate.count({
-    where: { companyId, status: "APPROVED", respondedAt: { gte: monthStart } },
+  const approvedInRange = await prisma.estimate.count({
+    where: { companyId, status: "APPROVED", respondedAt: { gte: salesRange.start, lt: salesRange.end } },
   });
 
   const openEstimateValue = openEstimates.reduce(
@@ -97,20 +139,20 @@ export async function getDashboardData(companyId: string) {
     })
     .reduce((sum, e) => sum + fromCents(getEstimateTotals(e).totalCents), 0);
 
-  const recoveredMonth = await prisma.estimate.findMany({
-    where: { companyId, status: "APPROVED", respondedAt: { gte: monthStart } },
+  const recoveredInRange = await prisma.estimate.findMany({
+    where: { companyId, status: "APPROVED", respondedAt: { gte: salesRange.start, lt: salesRange.end } },
     include: { options: { include: { lineItems: true } }, followUps: true },
   });
-  const recoveredValue = recoveredMonth
+  const recoveredValue = recoveredInRange
     .filter((e) => e.followUps.some((f) => f.status === "SENT"))
     .reduce((sum, e) => sum + fromCents(getEstimateTotals(e).totalCents), 0);
 
-  const grossProfitMonth = jobsCompletedMonth.reduce(
+  const grossProfitInRange = jobsCompletedInRange.reduce(
     (sum, j) => sum + (j.jobCost ? decToNum(j.jobCost.actualGrossProfit) : decToNum(j.quotedGrossProfit)),
     0
   );
-  const revenueMonth = jobsCompletedMonth.reduce((sum, j) => sum + decToNum(j.quotedTotal), 0);
-  const averageTicket = jobsCompletedMonth.length > 0 ? revenueMonth / jobsCompletedMonth.length : 0;
+  const revenueInRange = jobsCompletedInRange.reduce((sum, j) => sum + decToNum(j.quotedTotal), 0);
+  const averageTicket = jobsCompletedInRange.length > 0 ? revenueInRange / jobsCompletedInRange.length : 0;
 
   const scheduledHoursThisWeek = await prisma.job.findMany({
     where: { companyId, scheduledStart: { gte: weekStart, lt: weekEnd }, scheduledEnd: { not: null } },
@@ -135,9 +177,13 @@ export async function getDashboardData(companyId: string) {
   });
 
   return {
-    todaysRevenue: decToNum(paymentsToday._sum.amount),
-    cashCollectedMonth: decToNum(paymentsMonth._sum.amount),
-    revenueMonth,
+    salesRangeLabel: salesRange.label,
+    cashCollected: decToNum(paymentsInRange._sum.amount),
+    revenueBooked: revenueInRange,
+    grossProfit: grossProfitInRange,
+    jobsCompletedCount: jobsCompletedInRange.length,
+    averageTicket,
+    conversionRate: estimatesRespondedInRange > 0 ? (approvedInRange / estimatesRespondedInRange) * 100 : 0,
     outstandingInvoices: decToNum(outstandingInvoices._sum.balanceDue),
     openEstimateCount: openEstimates.length,
     openEstimateValue,
@@ -146,10 +192,6 @@ export async function getDashboardData(companyId: string) {
     newLeadsCount,
     leadsAwaitingResponse,
     estimatesAwaitingFollowUp,
-    conversionRate: estimatesRespondedMonth > 0 ? (approvedThisMonth / estimatesRespondedMonth) * 100 : 0,
-    averageTicket,
-    jobsCompletedMonth: jobsCompletedMonth.length,
-    grossProfitMonth,
     crewUtilization,
     needsFollowUpValue,
     noResponse3Value,
