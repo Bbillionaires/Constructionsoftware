@@ -8,6 +8,8 @@
  * provider entirely) here without touching any call site.
  */
 
+import { getRegionalCostMultiplier } from "@/lib/regional-pricing";
+
 export type ExtractedLineItem = {
   type: "LABOR" | "MATERIAL";
   description: string;
@@ -23,8 +25,10 @@ export type VoiceQuoteResult = {
   lineItems: ExtractedLineItem[];
 };
 
+export type JobLocation = { city?: string | null; state?: string | null; postalCode?: string | null };
+
 export interface VoiceQuoteProvider {
-  process(audio: Buffer, mimeType: string): Promise<VoiceQuoteResult>;
+  process(audio: Buffer, mimeType: string, location?: JobLocation): Promise<VoiceQuoteResult>;
 }
 
 class DevVoiceQuoteProvider implements VoiceQuoteProvider {
@@ -79,21 +83,23 @@ const KNOWN_SUPPLIERS = [
   "Build.com",
 ];
 
-const EXTRACTION_SYSTEM_PROMPT = `You turn a contractor's spoken job description into a structured quote.
+function buildExtractionSystemPrompt(locationLabel?: string): string {
+  return `You turn a contractor's spoken job description into a structured quote.
 Read the transcript and output ONLY a single JSON object (no markdown, no commentary) matching this shape:
 {
   "title": "short job title, 5 words or fewer",
   "lineItems": [
     { "type": "LABOR", "description": "...", "quantity": <hours, number>, "unitCost": <contractor's hourly cost, number>, "unitPrice": <what to charge the customer per hour, number> },
-    { "type": "MATERIAL", "description": "...", "supplier": "supplier name if mentioned, else omit", "quantity": <number>, "unitCost": <contractor's cost, number>, "unitPrice": <price charged to customer, number> }
+    { "type": "MATERIAL", "description": "...", "supplier": "supplier name if mentioned, else omit", "quantity": <number>, "unitCost": <contractor's cost, number>, "unitPrice": <price charged to customer, number>, "priceSpoken": <true if the contractor said an actual price for this item, false if you had to estimate it> }
   ]
 }
 Rules:
 - Create one LABOR line per distinct task mentioned, and one MATERIAL line per distinct material.
-- If no price was spoken for an item, put a reasonable market estimate in unitCost and mark unitPrice as unitCost * 1.5.
+- If no price was spoken for a MATERIAL item, set "priceSpoken": false and put a reasonable NATIONAL AVERAGE US market price in unitCost (mark unitPrice as unitCost * 1.5) — do not try to adjust it for the job's location yourself${locationLabel ? `; the app applies its own regional cost adjustment for ${locationLabel} afterward` : ""}. If the contractor did say a price, set "priceSpoken": true and use exactly what they said.
 - If nothing usable was said, return a single LABOR line with description "Could not understand recording — please edit manually" and zero amounts.
 - The transcript comes from speech-to-text and can mishear supplier names. Common suppliers contractors mention include: ${KNOWN_SUPPLIERS.join(", ")}. If a word in the transcript is clearly a mishearing of one of these (e.g. "Lowell" almost certainly means "Lowe's" in a materials context), use the correct name. Only do this when the mishearing is obvious — don't force an unrelated or local supplier's name into this list.
 - Never include any text outside the JSON object.`;
+}
 
 class CloudflareVoiceQuoteProvider implements VoiceQuoteProvider {
   constructor(
@@ -114,7 +120,7 @@ class CloudflareVoiceQuoteProvider implements VoiceQuoteProvider {
     return res.json();
   }
 
-  async process(audio: Buffer, mimeType: string): Promise<VoiceQuoteResult> {
+  async process(audio: Buffer, mimeType: string, location?: JobLocation): Promise<VoiceQuoteResult> {
     // Whisper on Workers AI rejects a generic application/octet-stream body
     // with "Invalid input" — it needs the real audio/* content type to know
     // how to decode the recording.
@@ -125,11 +131,13 @@ class CloudflareVoiceQuoteProvider implements VoiceQuoteProvider {
     )) as { result: { text: string } };
     const transcript = whisper.result.text.trim();
 
+    const regional = location ? getRegionalCostMultiplier(location) : undefined;
+
     const llm = (await this.run(
       "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
       JSON.stringify({
         messages: [
-          { role: "system", content: EXTRACTION_SYSTEM_PROMPT },
+          { role: "system", content: buildExtractionSystemPrompt(regional?.label) },
           { role: "user", content: transcript },
         ],
       }),
@@ -149,13 +157,16 @@ class CloudflareVoiceQuoteProvider implements VoiceQuoteProvider {
       llm.result.choices?.[0]?.message?.content ??
       (typeof llm.result.response === "string" ? llm.result.response : JSON.stringify(llm.result.response ?? {}));
 
-    const parsed = parseExtractionResponse(rawContent);
+    const parsed = parseExtractionResponse(rawContent, regional?.multiplier ?? 1);
     return { transcript, title: parsed.title, lineItems: parsed.lineItems };
   }
 }
 
 /** The model's output is free text that should contain one JSON object — pull it out defensively. */
-function parseExtractionResponse(raw: string): { title: string; lineItems: ExtractedLineItem[] } {
+function parseExtractionResponse(
+  raw: string,
+  regionalMultiplier = 1
+): { title: string; lineItems: ExtractedLineItem[] } {
   const match = raw.match(/\{[\s\S]*\}/);
   if (!match) return fallbackExtraction();
   try {
@@ -163,15 +174,29 @@ function parseExtractionResponse(raw: string): { title: string; lineItems: Extra
     if (!Array.isArray(json.lineItems) || json.lineItems.length === 0) return fallbackExtraction();
     const lineItems: ExtractedLineItem[] = json.lineItems
       .filter((li): li is Record<string, unknown> => typeof li === "object" && li !== null)
-      .map((li) => ({
-        type: li.type === "MATERIAL" ? "MATERIAL" : "LABOR",
-        description: typeof li.description === "string" && li.description.trim() ? li.description : "Untitled item",
-        supplier:
-          typeof li.supplier === "string" && li.supplier.trim() ? correctSupplierName(li.supplier) : undefined,
-        quantity: Number(li.quantity) > 0 ? Number(li.quantity) : 1,
-        unitCost: Number(li.unitCost) >= 0 ? Number(li.unitCost) : 0,
-        unitPrice: Number(li.unitPrice) >= 0 ? Number(li.unitPrice) : 0,
-      }));
+      .map((li) => {
+        const type = li.type === "MATERIAL" ? "MATERIAL" : "LABOR";
+        let unitCost = Number(li.unitCost) >= 0 ? Number(li.unitCost) : 0;
+        let unitPrice = Number(li.unitPrice) >= 0 ? Number(li.unitPrice) : 0;
+
+        // Only ever adjust a price the model had to guess (priceSpoken === false)
+        // — a price the contractor actually said out loud is never rescaled.
+        if (type === "MATERIAL" && li.priceSpoken === false && regionalMultiplier !== 1) {
+          unitCost = Math.round(unitCost * regionalMultiplier * 100) / 100;
+          unitPrice = Math.round(unitPrice * regionalMultiplier * 100) / 100;
+        }
+
+        return {
+          type,
+          description:
+            typeof li.description === "string" && li.description.trim() ? li.description : "Untitled item",
+          supplier:
+            typeof li.supplier === "string" && li.supplier.trim() ? correctSupplierName(li.supplier) : undefined,
+          quantity: Number(li.quantity) > 0 ? Number(li.quantity) : 1,
+          unitCost,
+          unitPrice,
+        };
+      });
     return {
       title: typeof json.title === "string" && json.title.trim() ? json.title.slice(0, 100) : "Voice quote",
       lineItems,

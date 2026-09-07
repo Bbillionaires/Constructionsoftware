@@ -23,8 +23,16 @@ export async function createEstimateFromVoiceAction(formData: FormData) {
   const allowed = await claimFreeEstimateOrRequireSubscription(session.companyId);
   if (!allowed) redirect("/billing");
 
+  // Feed the job's location through so material prices the AI has to
+  // estimate (nothing spoken) get adjusted for regional cost differences
+  // instead of defaulting to a flat national-average guess everywhere.
+  const property = await prisma.property.findUnique({
+    where: { id: propertyId },
+    select: { city: true, state: true, postalCode: true },
+  });
+
   const buffer = Buffer.from(await audio.arrayBuffer());
-  const result = await getVoiceQuoteProvider().process(buffer, audio.type);
+  const result = await getVoiceQuoteProvider().process(buffer, audio.type, property ?? undefined);
 
   const estimateId = await prisma.$transaction(async (tx) => {
     const number = await nextEstimateNumber(tx, session.companyId);
