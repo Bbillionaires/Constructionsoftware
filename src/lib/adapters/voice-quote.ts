@@ -55,6 +55,30 @@ class DevVoiceQuoteProvider implements VoiceQuoteProvider {
   }
 }
 
+// Common material/hardware suppliers a US contractor is likely to say out loud.
+// Whisper transcription regularly mishears these (e.g. "Lowe's" -> "Lowell"),
+// so the extraction model gets the list as context to correct obvious
+// mishearings, and parseExtractionResponse below does a fuzzy-match pass as
+// a safety net. Genuinely local/unlisted suppliers are left as spoken —
+// this only corrects near-misses of names on the list, never invents one.
+const KNOWN_SUPPLIERS = [
+  "Home Depot",
+  "Lowe's",
+  "Menards",
+  "Ace Hardware",
+  "True Value",
+  "Ferguson",
+  "Grainger",
+  "HD Supply",
+  "ABC Supply",
+  "84 Lumber",
+  "SiteOne Landscape Supply",
+  "Sherwin-Williams",
+  "White Cap",
+  "Floor & Decor",
+  "Build.com",
+];
+
 const EXTRACTION_SYSTEM_PROMPT = `You turn a contractor's spoken job description into a structured quote.
 Read the transcript and output ONLY a single JSON object (no markdown, no commentary) matching this shape:
 {
@@ -68,6 +92,7 @@ Rules:
 - Create one LABOR line per distinct task mentioned, and one MATERIAL line per distinct material.
 - If no price was spoken for an item, put a reasonable market estimate in unitCost and mark unitPrice as unitCost * 1.5.
 - If nothing usable was said, return a single LABOR line with description "Could not understand recording — please edit manually" and zero amounts.
+- The transcript comes from speech-to-text and can mishear supplier names. Common suppliers contractors mention include: ${KNOWN_SUPPLIERS.join(", ")}. If a word in the transcript is clearly a mishearing of one of these (e.g. "Lowell" almost certainly means "Lowe's" in a materials context), use the correct name. Only do this when the mishearing is obvious — don't force an unrelated or local supplier's name into this list.
 - Never include any text outside the JSON object.`;
 
 class CloudflareVoiceQuoteProvider implements VoiceQuoteProvider {
@@ -141,7 +166,8 @@ function parseExtractionResponse(raw: string): { title: string; lineItems: Extra
       .map((li) => ({
         type: li.type === "MATERIAL" ? "MATERIAL" : "LABOR",
         description: typeof li.description === "string" && li.description.trim() ? li.description : "Untitled item",
-        supplier: typeof li.supplier === "string" && li.supplier.trim() ? li.supplier : undefined,
+        supplier:
+          typeof li.supplier === "string" && li.supplier.trim() ? correctSupplierName(li.supplier) : undefined,
         quantity: Number(li.quantity) > 0 ? Number(li.quantity) : 1,
         unitCost: Number(li.unitCost) >= 0 ? Number(li.unitCost) : 0,
         unitPrice: Number(li.unitPrice) >= 0 ? Number(li.unitPrice) : 0,
@@ -153,6 +179,54 @@ function parseExtractionResponse(raw: string): { title: string; lineItems: Extra
   } catch {
     return fallbackExtraction();
   }
+}
+
+function normalizeSupplierName(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/['’.]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function levenshteinDistance(a: string, b: string): number {
+  const rows = a.length + 1;
+  const cols = b.length + 1;
+  const dp: number[][] = Array.from({ length: rows }, () => new Array(cols).fill(0));
+  for (let i = 0; i < rows; i++) dp[i][0] = i;
+  for (let j = 0; j < cols; j++) dp[0][j] = j;
+  for (let i = 1; i < rows; i++) {
+    for (let j = 1; j < cols; j++) {
+      dp[i][j] =
+        a[i - 1] === b[j - 1]
+          ? dp[i - 1][j - 1]
+          : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+    }
+  }
+  return dp[rows - 1][cols - 1];
+}
+
+/**
+ * Safety net for the extraction model's own supplier-name correction: snaps a
+ * near-miss (transcription artifact like "Lowell") to the closest known
+ * supplier when it's close enough to be clearly the same word, otherwise
+ * leaves it untouched — a real local/unlisted supplier should never get
+ * rewritten into an unrelated name on the list.
+ */
+function correctSupplierName(raw: string): string {
+  const cleaned = raw.trim();
+  if (!cleaned) return cleaned;
+  const normalizedRaw = normalizeSupplierName(cleaned);
+
+  let best: { supplier: string; distance: number } | null = null;
+  for (const supplier of KNOWN_SUPPLIERS) {
+    const distance = levenshteinDistance(normalizedRaw, normalizeSupplierName(supplier));
+    if (!best || distance < best.distance) best = { supplier, distance };
+  }
+  if (!best) return cleaned;
+
+  const threshold = Math.max(1, Math.round(normalizeSupplierName(best.supplier).length * 0.35));
+  return best.distance <= threshold ? best.supplier : cleaned;
 }
 
 function fallbackExtraction(): { title: string; lineItems: ExtractedLineItem[] } {
