@@ -91,7 +91,13 @@ class SquareSubscriptionProvider implements SubscriptionProvider {
                   phases: [
                     {
                       cadence: "MONTHLY",
-                      recurring_price_money: { amount: SUBSCRIPTION_PRICE_DOLLARS * 100, currency: "USD" },
+                      // Square-Version 2024-10-17+ rejects the older
+                      // recurring_price_money field on a phase — it now
+                      // requires this price to be set via `pricing` instead.
+                      pricing: {
+                        type: "STATIC",
+                        price_money: { amount: SUBSCRIPTION_PRICE_DOLLARS * 100, currency: "USD" },
+                      },
                     },
                   ],
                 },
